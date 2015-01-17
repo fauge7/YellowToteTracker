@@ -168,7 +168,7 @@ public class YellowToteTracker{
 					Core.FONT_HERSHEY_PLAIN, 1, Red);
 			//view this file to see the vision tracking
 			//windows will update the image after every save
-			Highgui.imwrite("rectangle.png", frame);
+			//Highgui.imwrite("rectangle.png", frame);
 		//mostly for debugging but errors happen
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
