@@ -18,6 +18,8 @@ import org.opencv.core.Scalar;
 import org.opencv.highgui.Highgui;
 import org.opencv.imgproc.Imgproc;
 
+import edu.wpi.first.wpilibj.networktables.NetworkTable;
+
 /*
  * @author: Elijah Kaufman and his team
  * 
@@ -27,7 +29,8 @@ import org.opencv.imgproc.Imgproc;
 
 
 public class YellowToteTracker{
-	public static Scalar Red,Blue,Green,Yellow,thresh_Lower,thresh_Higher;
+	public static Scalar Red,Blue,Green,Yellow,thresh_Lower,thresh_Higher,grey_Lower,grey_higher;
+	static NetworkTable table;
 	public static void main(String[] args) {
 		//required for openCV to work -call before any functions of oCV are used
 		System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
@@ -35,15 +38,24 @@ public class YellowToteTracker{
 		Blue = new Scalar(255, 0, 0);
 		Green = new Scalar(0, 255, 0);
 		Yellow = new Scalar(0, 255, 255);
-		thresh_Lower = new Scalar(50,145,0);
-		thresh_Higher = new Scalar(255,255,60);
+		//for tape
+		thresh_Lower = new Scalar(62,102,0);
+		thresh_Higher = new Scalar(255,255,47);
+		//for grey tote
+		grey_Lower = new Scalar(48,60,35);
+		grey_higher = new Scalar(81,84,54);
 		
-		
+		NetworkTable.setClientMode();
+		NetworkTable.setIPAddress("roborio-3019.local");
+		table = NetworkTable.getTable("SmartDashboard");
 		
 		//main loop of the program
+		
 		while(true){
 			try {
-				processImage();
+				while(table.isConnected()){
+					processImage();
+				}
 			} catch (Exception e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -63,10 +75,12 @@ public class YellowToteTracker{
 			ImageIO.write(img, "png", new File("frame.png"));
 			//time for the OpenCV fun!
 			Mat frame = new Mat();
-			frame = Highgui.imread("frame.png");
+			Mat grey = new Mat();
+			Mat original = new Mat();
+			original = Highgui.imread("frame.png");
 			ArrayList<MatOfPoint> contours = new ArrayList<>();
 			//applies a threshhold in the form of BlueGreenRed
-			Core.inRange(frame, thresh_Lower, thresh_Higher, frame);
+			Core.inRange(original, thresh_Lower, thresh_Higher, frame);
 			//find the cluster of particles
 			Imgproc.findContours(frame, contours, new Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 			Imgproc.cvtColor(frame, frame, Imgproc.COLOR_GRAY2BGR);
@@ -143,6 +157,7 @@ public class YellowToteTracker{
 						string = "Two totes stacked";
 						Core.line(frame, new Point(bb1.x+bb1.width/2,bb1.y+bb1.height/2),
 								new Point(bb2.x+bb2.width/2,bb2.y+bb2.height/2), Green);
+						//System.out.println(Math.abs((bb1.y + bb1.height/2) - (bb2.y + bb2.height)));
 					}
 					else{
 					string = "Two totes found";
@@ -151,15 +166,65 @@ public class YellowToteTracker{
 				else{
 					//knowing how far off the center of the image you can set your robot to align with it, essentially going towards it
 					string = "Off center by " + (bb1.x + bb1.width/2 - 320) + " pixels";
+					table.putNumber("Off Center", (bb1.x + bb1.width/2 - 320));
+					int print = bb1.width;
+					System.out.println(print / 640.0);
+					table.putNumber("ToteToScreen", bb1.width / 640.0);
 				}
 				//putting the data in a visible form
 				Core.putText(frame, string, new Point(200,frame.size().height-10), Core.FONT_HERSHEY_PLAIN, 1, Red);
 			}
+			else if(contours.size() == 3){
+				ArrayList<Rect> rect = new ArrayList<>();
+				for(MatOfPoint mOP : contours){
+					rect.add(Imgproc.boundingRect(mOP));
+					Rect temp = rect.get(rect.size()-1);
+					Core.rectangle(frame, temp.br(),temp.tl(), Red);
+				}
+				for(int i = 1; i < contours.size();i++){
+					if(Math.abs(rect.get(i).y - rect.get(i-1).y) < 5){
+						
+						Rect r1 = rect.get(i);
+						Rect r2 = rect.get(i-1);
+						Point tl = r1.tl();
+						Point br = r1.br();
+						if(tl.x > r2.tl().x){
+							tl.x = r2.tl().x;
+						}
+						if(tl.y > r2.tl().y){
+							tl.y = r2.tl().y;
+						}
+						if(br.x < r2.br().x){
+							br.x = r2.br().x;
+						}
+						if(br.y < r2.br().y){
+							br.y = r2.br().y;
+						}
+						break;
+					}
+				}
+			}
 			else{
+				
 				for(MatOfPoint mOP : contours){
 					Rect rec = Imgproc.boundingRect(mOP);
-					Core.rectangle(frame, rec.tl(), rec.br(), Yellow);
+					Core.rectangle(frame, rec.tl(), rec.br(), Red);
 				}
+			}
+			//processing for grey totes
+			Core.inRange(original, grey_Lower, grey_higher, grey);
+			Imgproc.findContours(grey, contours, new Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+			Imgproc.cvtColor(grey, grey, Imgproc.COLOR_GRAY2BGR);
+			//iterating through the list of contours and removing the ones with an "area" less then 100
+			for (Iterator<MatOfPoint> iterator = contours.iterator(); iterator.hasNext();) {
+				MatOfPoint matOfPoint = (MatOfPoint) iterator.next();
+				if(matOfPoint.width() * matOfPoint.height() < 150){
+					iterator.remove();
+				}	
+			}
+			for(MatOfPoint mop : contours){
+				Rect bb = Imgproc.boundingRect(mop);
+				Core.rectangle(grey, bb.tl(), bb.br(), Red);
 			}
 			//gui on the image
 			Core.line(frame, new Point(frame.width()/2,100),new Point(frame.width()/2,frame.height()-100), Blue);
@@ -169,6 +234,7 @@ public class YellowToteTracker{
 			//view this file to see the vision tracking
 			//windows will update the image after every save
 			Highgui.imwrite("rectangle.png", frame);
+			//Highgui.imwrite("grey.jpg", grey);
 		//mostly for debugging but errors happen
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
